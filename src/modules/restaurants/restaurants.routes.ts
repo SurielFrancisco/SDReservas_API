@@ -59,6 +59,44 @@ restaurantsRouter.post("/", requireAuth, requireRole("ADMIN"), async (req, res) 
   res.status(201).json({ restaurante: r });
 });
 
+restaurantsRouter.get("/public", async (_req, res) => {
+  const restaurantes = await prisma.restaurante.findMany({
+    where: { activo: true },
+    orderBy: { nombre: "asc" },
+    select: {
+      id: true,
+      nombre: true,
+      tipoCocina: true,
+      ubicacion: true,
+      zonaHoraria: true,
+      activo: true,
+    },
+  });
+  res.json({ restaurantes });
+});
+
+restaurantsRouter.get("/:id/public", async (req, res) => {
+  const id = z.uuid().parse(req.params.id);
+  const restaurante = await prisma.restaurante.findFirst({
+    where: { id, activo: true },
+    select: {
+      id: true,
+      nombre: true,
+      tipoCocina: true,
+      ubicacion: true,
+      zonaHoraria: true,
+      activo: true,
+      horarios: { orderBy: { diaSemana: "asc" } },
+      pisos: {
+        orderBy: { orden: "asc" },
+        include: { areas: { include: { mesas: { orderBy: { etiqueta: "asc" } } } } },
+      },
+    },
+  });
+  if (!restaurante) throw notFound("Restaurante no encontrado");
+  res.json({ restaurante });
+});
+
 restaurantsRouter.get("/", requireAuth, async (req, res) => {
   const u = req.user!;
   let where: Prisma.RestauranteWhereInput;
