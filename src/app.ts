@@ -18,8 +18,14 @@ import { meRouter } from "./modules/reservations/me.routes.js";
 
 export const app = express();
 
+const configuredOrigins = env.CORS_ORIGIN.split(",").map((origin) => origin.trim());
+const allowedOrigins = [
+  ...configuredOrigins,
+  ...configuredOrigins.map((origin) => origin.replace("localhost", "127.0.0.1")),
+];
+
 app.use(helmet());
-app.use(cors({ origin: env.CORS_ORIGIN.split(","), credentials: true }));
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({ limit: "100kb" }));
 
 app.use("/api/v1/health", healthRouter);
