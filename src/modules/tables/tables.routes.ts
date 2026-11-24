@@ -158,10 +158,23 @@ tablesRouter.delete("/tables/:tableId", requireAuth, requireRole("ADMIN"), async
   if (!mesa) throw notFound("Mesa no encontrada");
   await restauranteAutorizado(req.user!, mesa.restauranteId, "admin");
 
-  const historial = await prisma.reservaMesa.count({ where: { mesaId: tableId } });
-  if (historial > 0) throw conflict("La mesa tiene reservas en su historial; no se puede eliminar");
+  const reservasActivas = await prisma.reservaMesa.count({
+    where: {
+      mesaId: tableId,
+      activa: true,
+      reserva: { estado: { in: ["UPCOMING", "PENDING_PAYMENT", "CHECKED_IN"] } },
+    },
+  });
+  if (reservasActivas > 0) {
+    throw conflict("La mesa tiene reservas activas; cancélalas, complétalas o reasígnalas antes de eliminarla");
+  }
 
-  await prisma.mesa.delete({ where: { id: tableId } });
+  // Las asociaciones de reservas históricas usan una llave foránea restrictiva.
+  // Se eliminan sólo esas asociaciones, no las reservas ni su historial.
+  await prisma.$transaction([
+    prisma.reservaMesa.deleteMany({ where: { mesaId: tableId } }),
+    prisma.mesa.delete({ where: { id: tableId } }),
+  ]);
   await registrarAuditoria({
     actorId: req.user!.id, restauranteId: mesa.restauranteId, accion: "TABLE_DELETED", entidad: "mesa", entidadId: tableId,
   });
