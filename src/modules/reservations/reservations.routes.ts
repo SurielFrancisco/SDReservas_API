@@ -14,10 +14,13 @@ export const reservationsRouter = Router();
 
 const ESTADOS_ACTIVOS: EstadoReserva[] = ["PENDING_PAYMENT", "UPCOMING", "CHECKED_IN"];
 
+const MODALIDADES_PAGADAS = ["AUTO_FIXED", "PER_PERSON", "TABLE_FIXED", "TABLE_PER_PERSON"];
+const CON_ELECCION_DE_MESA = ["TABLE_FREE", "TABLE_FIXED", "TABLE_PER_PERSON"];
+
 const crearSchema = z
   .object({
     restauranteId: z.uuid(),
-    modalidad: z.enum(["AUTO_FREE", "ZONE_FREE", "TABLE_FREE"]),
+    modalidad: z.enum(["AUTO_FREE", "ZONE_FREE", "TABLE_FREE", "AUTO_FIXED", "PER_PERSON", "TABLE_FIXED", "TABLE_PER_PERSON"]),
     fecha: z.string(),
     hora: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato HH:MM"),
     duracion: z.number().int(),
@@ -29,8 +32,8 @@ const crearSchema = z
     if (d.modalidad === "ZONE_FREE" && !d.areaId) {
       ctx.addIssue({ code: "custom", message: "areaId es obligatorio con ZONE_FREE", path: ["areaId"] });
     }
-    if (d.modalidad === "TABLE_FREE" && !d.mesaId) {
-      ctx.addIssue({ code: "custom", message: "mesaId es obligatorio con TABLE_FREE", path: ["mesaId"] });
+    if (CON_ELECCION_DE_MESA.includes(d.modalidad) && !d.mesaId) {
+      ctx.addIssue({ code: "custom", message: `mesaId es obligatorio con ${d.modalidad}`, path: ["mesaId"] });
     }
   });
 
@@ -77,7 +80,8 @@ reservationsRouter.post("/reservations", requireAuth, requireRole("CLIENTE"), as
         const reputacion = Number(cliente.reputacion);
         const nivel = nivelReputacion(reputacion);
         const limites = LIMITES[nivel];
-        if (!limites.gratuitas) {
+        const esModalidadPagada = MODALIDADES_PAGADAS.includes(data.modalidad);
+        if (!limites.gratuitas && !esModalidadPagada) {
           throw new AppError(
             403,
             "REPUTATION_RESTRICTED",
@@ -109,7 +113,7 @@ reservationsRouter.post("/reservations", requireAuth, requireRole("CLIENTE"), as
         // Elección de mesa según la modalidad
         const libres = await mesasLibres(tx, restaurante.id, v.inicio, v.fin, data.personas);
         let mesa;
-        if (data.modalidad === "AUTO_FREE") {
+        if (data.modalidad === "AUTO_FREE" || data.modalidad === "AUTO_FIXED" || data.modalidad === "PER_PERSON") {
           mesa = libres[0];
         } else if (data.modalidad === "ZONE_FREE") {
           const area = await tx.area.findFirst({
@@ -128,7 +132,15 @@ reservationsRouter.post("/reservations", requireAuth, requireRole("CLIENTE"), as
           );
         }
 
-        return tx.reserva.create({
+        const esPagada = MODALIDADES_PAGADAS.includes(data.modalidad);
+        const importeBase = Number(config.importe ?? 0);
+        const importe = data.modalidad === "AUTO_FIXED" || data.modalidad === "TABLE_FIXED"
+          ? importeBase
+          : data.modalidad === "PER_PERSON" || data.modalidad === "TABLE_PER_PERSON"
+            ? data.personas * importeBase
+            : 0;
+
+        const nuevaReserva = await tx.reserva.create({
           data: {
             restauranteId: restaurante.id,
             clienteId,
@@ -139,11 +151,12 @@ reservationsRouter.post("/reservations", requireAuth, requireRole("CLIENTE"), as
             fin: v.fin,
             duracionMin: data.duracion,
             estado: "UPCOMING",
-            importeAplicado: 0,
+            importeAplicado: importe,
             condiciones: {
               modalidad: data.modalidad,
-              esPagada: false,
-              importe: 0,
+              esPagada,
+              importe,
+              moneda: "MXN",
               reputacionAlReservar: reputacion,
             },
             creadaPorId: clienteId,
@@ -151,6 +164,14 @@ reservationsRouter.post("/reservations", requireAuth, requireRole("CLIENTE"), as
           },
           include: incluir,
         });
+
+        // Al crear la reservación, la mesa queda como RESERVED (no disponible)
+        await tx.mesa.updateMany({
+          where: { id: mesa.id, estado: { not: "OUT_OF_SERVICE" } },
+          data: { estado: "RESERVED" },
+        });
+
+        return nuevaReserva;
       },
       { maxWait: 10_000, timeout: 20_000 },
     );

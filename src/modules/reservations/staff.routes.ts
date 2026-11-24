@@ -115,7 +115,7 @@ staffRouter.post(
             throw new AppError(409, "TABLE_TAKEN", `Mesa(s) ocupadas o reservadas en ese horario: ${etiquetas}`);
           }
 
-          return tx.reserva.create({
+          const nuevaReserva = await tx.reserva.create({
             data: {
               restauranteId: id,
               clienteId: null,
@@ -136,6 +136,14 @@ staffRouter.post(
             },
             include: incluir,
           });
+
+          // Las mesas de reserva presencial quedan ocupadas de inmediato
+          await tx.mesa.updateMany({
+            where: { id: { in: data.mesaIds }, estado: { not: "OUT_OF_SERVICE" } },
+            data: { estado: "OCCUPIED" },
+          });
+
+          return nuevaReserva;
         },
         { maxWait: 10_000, timeout: 20_000 },
       );

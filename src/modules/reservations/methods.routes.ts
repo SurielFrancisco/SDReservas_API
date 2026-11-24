@@ -8,8 +8,15 @@ import { notFound, unprocessable } from "../../lib/errors.js";
 
 export const methodsRouter = Router();
 
-// Fase 5: solo las gratuitas. Las pagadas se habilitan en la fase de pagos.
-export const MODALIDADES_HABILITABLES = ["AUTO_FREE", "ZONE_FREE", "TABLE_FREE"];
+export const MODALIDADES_HABILITABLES = [
+  "AUTO_FREE",
+  "ZONE_FREE",
+  "TABLE_FREE",
+  "AUTO_FIXED",
+  "PER_PERSON",
+  "TABLE_FIXED",
+  "TABLE_PER_PERSON",
+];
 
 // Catálogo completo de la plataforma
 methodsRouter.get("/reservation-methods", requireAuth, async (_req, res) => {
@@ -47,6 +54,7 @@ methodsRouter.get("/restaurants/:id/reservation-methods", requireAuth, async (re
     nombre: m.nombre,
     esPagada: m.esPagada,
     activa: porModalidad.get(m.id)?.activa ?? false,
+    importe: porModalidad.get(m.id)?.importe ? Number(porModalidad.get(m.id)?.importe) : null,
     habilitable: MODALIDADES_HABILITABLES.includes(m.codigo),
   }));
   if (u.rol === "CLIENTE") lista = lista.filter((m) => m.activa);
@@ -56,7 +64,11 @@ methodsRouter.get("/restaurants/:id/reservation-methods", requireAuth, async (re
 
 const putSchema = z.object({
   modalidades: z
-    .array(z.object({ codigo: z.string().min(1).max(40), activa: z.boolean() }))
+    .array(z.object({
+      codigo: z.string().min(1).max(40),
+      activa: z.boolean(),
+      importe: z.number().positive().max(100000).optional(),
+    }))
     .min(1)
     .max(20),
 });
@@ -82,6 +94,11 @@ methodsRouter.put(
       if (m.activa && !MODALIDADES_HABILITABLES.includes(m.codigo)) {
         throw unprocessable(`La modalidad ${m.codigo} aún no está disponible`);
       }
+      if (["AUTO_FIXED", "PER_PERSON", "TABLE_FIXED", "TABLE_PER_PERSON"].includes(m.codigo)) {
+        if (m.activa && (m.importe === undefined || m.importe <= 0)) {
+          throw unprocessable(`Debes indicar una tarifa válida para ${porCodigo.get(m.codigo)!.nombre}`);
+        }
+      }
     }
 
     await prisma.$transaction(
@@ -89,8 +106,8 @@ methodsRouter.put(
         const modalidadId = porCodigo.get(m.codigo)!.id;
         return prisma.restauranteModalidad.upsert({
           where: { restauranteId_modalidadId: { restauranteId: id, modalidadId } },
-          update: { activa: m.activa },
-          create: { restauranteId: id, modalidadId, activa: m.activa },
+          update: { activa: m.activa, ...(m.importe !== undefined ? { importe: m.importe } : {}) },
+          create: { restauranteId: id, modalidadId, activa: m.activa, importe: m.importe ?? null },
         });
       }),
     );

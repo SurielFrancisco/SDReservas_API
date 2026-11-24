@@ -19,7 +19,6 @@ import {
 export const lifecycleRouter = Router();
 
 const TOLERANCIA_MS = 15 * 60_000;
-const VENTANA_CANCELACION_MS = 2 * 60 * 60_000;
 const uuid = z.uuid();
 
 const incluir = {
@@ -196,6 +195,7 @@ lifecycleRouter.post(
         where: { id: { in: mesaIds }, estado: { not: "OUT_OF_SERVICE" } },
         data: { estado: "AVAILABLE" },
       });
+      await tx.reservaMesa.updateMany({ where: { reservaId: id }, data: { activa: false } });
 
       // Las presenciales sin cuenta no tocan reputación
       const reputacion =
@@ -234,6 +234,7 @@ lifecycleRouter.post(
     const resultado = await prisma.$transaction(async (tx) => {
       const u = await tx.reserva.updateMany({ where: { id, estado: "UPCOMING" }, data: { estado: "NO_SHOW" } });
       if (u.count === 0) throw conflict("La reserva cambió de estado; vuelve a consultarla");
+      await tx.reservaMesa.updateMany({ where: { reservaId: id }, data: { activa: false } });
 
       const reputacion =
         r.clienteId && r.origen === "ONLINE"
@@ -265,13 +266,10 @@ lifecycleRouter.post("/reservations/:id/cancel", requireAuth, async (req, res) =
   if (u.rol === "CLIENTE") {
     // 404 y no 403, para no revelar que la reserva existe
     if (r.clienteId !== u.id) throw notFound("Reserva no encontrada");
-    if (esPagada(r)) {
-      throw new AppError(409, "PAID_CANCELLATION_UNAVAILABLE", "La cancelación de reservas pagadas aún no está disponible");
-    }
-    if (r.inicio.getTime() - Date.now() < VENTANA_CANCELACION_MS) {
-      throw new AppError(409, "CANCELLATION_WINDOW_CLOSED", "Solo puedes cancelar con al menos 2 horas de anticipación");
-    }
-    politica = "FREE_CLIENT_2H";
+    // Temporalmente no se aplica una ventana mínima de cancelación.
+    // Aún no existe una pasarela de cobro ni reembolsos automáticos: el importe
+    // queda registrado para que la operación lo resuelva fuera del sistema.
+    politica = esPagada(r) ? "PAID_CLIENT" : "FREE_CLIENT";
   } else if (u.rol === "MESERO") {
     throw forbidden();
   } else {
@@ -296,6 +294,14 @@ lifecycleRouter.post("/reservations/:id/cancel", requireAuth, async (req, res) =
       },
     });
     if (x.count === 0) throw conflict("La reserva cambió de estado; vuelve a consultarla");
+
+    const mesaIds = r.mesas.map((m) => m.mesaId);
+    await tx.mesa.updateMany({
+      where: { id: { in: mesaIds }, estado: { not: "OUT_OF_SERVICE" } },
+      data: { estado: "AVAILABLE" },
+    });
+    await tx.reservaMesa.updateMany({ where: { reservaId: id }, data: { activa: false } });
+
     return tx.reserva.findUniqueOrThrow({ where: { id }, include: incluir });
   });
 
