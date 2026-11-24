@@ -70,7 +70,11 @@ Cuerpo: `{ "email": "...", "password": "..." }`. Responde `200` con el mismo for
 
 ### `GET /auth/me`
 
-Devuelve el usuario del token: `{ "user": { "id", "rol", "email", "nombre" } }`.
+Devuelve el usuario del token: `{ "user": { "id", "rol", "email", "nombre" } }`. Para `RECEPCIONISTA` y `MESERO` agrega `"restaurantes": [{ "id", "nombre" }]` con los restaurantes activos que tiene asignados (igual que en `POST /auth/login`).
+
+### `PATCH /auth/me`
+
+Actualiza el perfil del usuario autenticado. Campos opcionales (al menos uno): `nombre`, `email`, `password` (mín. 8) y `passwordActual`. **Cambiar el correo o la contraseña exige `passwordActual`**; si es incorrecta responde `422` (no `401`, para no cerrar la sesión del cliente). Si el correo ya existe responde `409`. Devuelve `{ "user": { "id", "rol", "email", "nombre" } }`; el token sigue siendo válido.
 
 ---
 
@@ -81,7 +85,7 @@ Devuelve el usuario del token: `{ "user": { "id", "rol", "email", "nombre" } }`.
 | `CLIENTE` | `POST /auth/register` | Reservar, ver y cancelar sus reservas, ver su reputación |
 | `ADMIN` | Script de seed (no hay ruta pública) | Todo sobre **sus propios** restaurantes |
 | `RECEPCIONISTA` | El admin lo da de alta | Operar reservas y estados de mesa del restaurante asignado |
-| `MESERO` | El admin lo da de alta | Ver estructura y mesas. No gestiona reservas ni cambia estados de mesa |
+| `MESERO` | El admin lo da de alta | Ver estructura y mesas y cambiar su estado (disponible, ocupada, fuera de servicio con motivo). No gestiona reservas |
 
 ---
 
@@ -158,6 +162,16 @@ Detalle con horarios, pisos, áreas y mesas anidados. Los horarios en esta ruta 
 ### `PATCH /restaurants/:id` (ADMIN dueño)
 
 Campos opcionales: `nombre`, `tipoCocina`, `ubicacion`, `activo`. Debe enviarse al menos uno. El límite de mesas **no se puede editar** por ahora.
+
+### `PUT /restaurants/:id/image` (ADMIN dueño)
+
+Sube o reemplaza la imagen de portada (una por restaurante). El cuerpo es el **archivo en binario** con `Content-Type: image/jpeg`, `image/png` o `image/webp` (máx. 5 MB; el contenido se valida). Se guarda en Cloudinary y se limita a 1600×1200. Responde `{ restaurante: { id, imagenUrl } }`. Si el servicio no está configurado (`CLOUDINARY_URL`) responde `503 IMAGES_UNAVAILABLE`.
+
+### `DELETE /restaurants/:id/image` (ADMIN dueño)
+
+Elimina la imagen de Cloudinary y deja `imagenUrl` en `null`. Responde `204`.
+
+Todas las rutas que devuelven restaurantes incluyen `imagenUrl` (puede ser `null`).
 
 ---
 
@@ -252,7 +266,9 @@ Admin y personal asignado (incluido el mesero). Devuelve `{ mesas }` con su áre
 
 Campos opcionales: `areaId`, `etiqueta`, `capacidad`, `forma`. No se puede cambiar `capacidad` ni `areaId` si la mesa tiene reservas futuras activas (`409`).
 
-### `PATCH /tables/:tableId/status` (ADMIN o RECEPCIONISTA)
+### `PATCH /tables/:tableId/status` (ADMIN, RECEPCIONISTA o MESERO)
+
+El **mesero** solo puede marcar `AVAILABLE`, `OCCUPIED` u `OUT_OF_SERVICE` (`RESERVED` responde `403`) y, para `OUT_OF_SERVICE`, debe enviar `motivo` (mín. 3 caracteres; `422` si falta).
 
 ```json
 { "estado": "OUT_OF_SERVICE", "motivo": "Mesa en reparación" }
