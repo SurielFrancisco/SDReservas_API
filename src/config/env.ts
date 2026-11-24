@@ -7,6 +7,8 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(16),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
+  // cloudinary://<api_key>:<api_secret>@<cloud_name>. Opcional: sin él, la subida de imágenes responde 503.
+  CLOUDINARY_URL: z.string().optional(),
 });
 
 export const env = schema.parse(process.env);

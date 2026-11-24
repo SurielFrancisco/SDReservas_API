@@ -1,11 +1,12 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { requireAuth, requireRole } from "../../middlewares/auth.js";
 import { restauranteAutorizado } from "../../lib/access.js";
 import { registrarAuditoria } from "../../lib/audit.js";
-import { forbidden, notFound } from "../../lib/errors.js";
+import { badRequest, notFound } from "../../lib/errors.js";
+import { eliminarImagenRestaurante, esImagenValida, subirImagenRestaurante } from "../../lib/cloudinary.js";
 
 export const restaurantsRouter = Router();
 
@@ -30,7 +31,7 @@ const crearSchema = z.object({
   tipoCocina: z.string().trim().min(2).max(80),
   ubicacion: z.string().trim().min(2).max(200),
   rfc,
-  limiteMesas: z.number().int().min(1).max(500),
+  limiteMesas: z.number().int().min(1).max(500).default(500),
   zonaHoraria: zonaHoraria.optional(),
 });
 
@@ -39,6 +40,7 @@ const editarSchema = z
     nombre: z.string().trim().min(2).max(120),
     tipoCocina: z.string().trim().min(2).max(80),
     ubicacion: z.string().trim().min(2).max(200),
+    limiteMesas: z.number().int().min(1).max(500),
     activo: z.boolean(),
   })
   .partial()
@@ -47,7 +49,7 @@ const editarSchema = z
 restaurantsRouter.post("/", requireAuth, requireRole("ADMIN"), async (req, res) => {
   const data = crearSchema.parse(req.body);
   const r = await prisma.restaurante.create({
-    data: { ...data, adminId: req.user!.id },
+    data: { ...data, adminId: req.user!.id, activo: false },
   });
   await registrarAuditoria({
     actorId: req.user!.id,
@@ -69,6 +71,7 @@ restaurantsRouter.get("/public", async (_req, res) => {
       tipoCocina: true,
       ubicacion: true,
       zonaHoraria: true,
+      imagenUrl: true,
       activo: true,
     },
   });
@@ -85,6 +88,7 @@ restaurantsRouter.get("/:id/public", async (req, res) => {
       tipoCocina: true,
       ubicacion: true,
       zonaHoraria: true,
+      imagenUrl: true,
       activo: true,
       horarios: { orderBy: { diaSemana: "asc" } },
       pisos: {
@@ -113,6 +117,7 @@ restaurantsRouter.get("/", requireAuth, async (req, res) => {
       tipoCocina: true,
       ubicacion: true,
       zonaHoraria: true,
+      imagenUrl: true,
       activo: true,
       ...(u.rol === "ADMIN" ? { rfc: true, limiteMesas: true } : {}),
     },
@@ -139,6 +144,7 @@ restaurantsRouter.get("/:id", requireAuth, async (req, res) => {
       tipoCocina: true,
       ubicacion: true,
       zonaHoraria: true,
+      imagenUrl: true,
       activo: true,
       ...(u.rol === "ADMIN" ? { rfc: true, limiteMesas: true } : {}),
       horarios: { orderBy: { diaSemana: "asc" } },
@@ -166,4 +172,48 @@ restaurantsRouter.patch("/:id", requireAuth, requireRole("ADMIN"), async (req, r
     detalle: data,
   });
   res.json({ restaurante: r });
+});
+
+// Imagen de portada: un archivo por restaurante, guardado en Cloudinary.
+// El cuerpo es el archivo en binario (Content-Type image/jpeg, image/png o image/webp).
+restaurantsRouter.put(
+  "/:id/image",
+  requireAuth,
+  requireRole("ADMIN"),
+  express.raw({ type: ["image/jpeg", "image/png", "image/webp"], limit: "5mb" }),
+  async (req, res) => {
+    const id = z.uuid().parse(req.params.id);
+    await restauranteAutorizado(req.user!, id, "admin");
+    const body: unknown = req.body;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      throw badRequest("Envía la imagen como JPEG, PNG o WebP (máx. 5 MB)");
+    }
+    if (!esImagenValida(body)) throw badRequest("El archivo no es una imagen válida");
+
+    const imagenUrl = await subirImagenRestaurante(id, body);
+    const r = await prisma.restaurante.update({ where: { id }, data: { imagenUrl } });
+    await registrarAuditoria({
+      actorId: req.user!.id,
+      restauranteId: id,
+      accion: "RESTAURANT_IMAGE_SET",
+      entidad: "restaurante",
+      entidadId: id,
+    });
+    res.json({ restaurante: { id: r.id, imagenUrl: r.imagenUrl } });
+  },
+);
+
+restaurantsRouter.delete("/:id/image", requireAuth, requireRole("ADMIN"), async (req, res) => {
+  const id = z.uuid().parse(req.params.id);
+  await restauranteAutorizado(req.user!, id, "admin");
+  await eliminarImagenRestaurante(id);
+  await prisma.restaurante.update({ where: { id }, data: { imagenUrl: null } });
+  await registrarAuditoria({
+    actorId: req.user!.id,
+    restauranteId: id,
+    accion: "RESTAURANT_IMAGE_REMOVED",
+    entidad: "restaurante",
+    entidadId: id,
+  });
+  res.status(204).end();
 });
