@@ -42,7 +42,7 @@ app.use("/api/v1", lifecycleRouter);
 app.use("/api/v1", meRouter);
 
 app.use((_req, res) => {
-  res.status(404).json({ error: { code: "NOT_FOUND", message: "Ruta no encontrada" } });
+  res.status(404).json({ error: { code: "NOT_FOUND", message: "No encontramos lo que buscas" } });
 });
 
 app.use(errorHandler);

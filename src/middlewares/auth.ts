@@ -23,7 +23,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     try {
       payload = verifyToken(header.slice(7));
     } catch {
-      throw unauthorized("Token inválido o expirado");
+      throw unauthorized("Tu sesión expiró. Inicia sesión de nuevo");
     }
 
     const user = await prisma.usuario.findUnique({ where: { id: payload.sub } });

@@ -7,7 +7,7 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return res.status(422).json({
       error: {
         code: "VALIDATION_ERROR",
-        message: "Datos inválidos",
+        message: "Revisa los datos ingresados",
         details: err.issues.map((i) => ({ campo: i.path.join("."), mensaje: i.message })),
       },
     });
@@ -18,8 +18,8 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
       .json({ error: { code: err.code, message: err.message, details: err.details } });
   }
   if (err instanceof SyntaxError && "body" in err) {
-    return res.status(400).json({ error: { code: "BAD_JSON", message: "JSON mal formado" } });
+    return res.status(400).json({ error: { code: "BAD_JSON", message: "No se pudo procesar tu solicitud" } });
   }
   console.error(err);
-  res.status(500).json({ error: { code: "INTERNAL", message: "Error interno del servidor" } });
+  res.status(500).json({ error: { code: "INTERNAL", message: "Algo salió mal. Inténtalo de nuevo en unos minutos" } });
 }
