@@ -4,7 +4,7 @@ import { prisma } from "../../lib/prisma.js";
 import { requireAuth, requireRole } from "../../middlewares/auth.js";
 import { restauranteAutorizado } from "../../lib/access.js";
 import { registrarAuditoria } from "../../lib/audit.js";
-import { conflict, notFound, unprocessable } from "../../lib/errors.js";
+import { conflict, forbidden, notFound, unprocessable } from "../../lib/errors.js";
 import { esViolacionUnica } from "../../lib/prismaErrors.js";
 
 export const tablesRouter = Router();
@@ -119,17 +119,27 @@ tablesRouter.patch("/tables/:tableId", requireAuth, requireRole("ADMIN"), async 
   }
 });
 
-// Cambio de estado: solo ADMIN y RECEPCIONISTA (mesero pendiente de reconfirmar)
+// Cambio de estado: ADMIN, RECEPCIONISTA y MESERO (el mesero es quien ve primero que una mesa se libera
+// o queda fuera de servicio). El mesero no puede marcar RESERVED (eso lo determinan las reservas).
 tablesRouter.patch(
   "/tables/:tableId/status",
   requireAuth,
-  requireRole("ADMIN", "RECEPCIONISTA"),
+  requireRole("ADMIN", "RECEPCIONISTA", "MESERO"),
   async (req, res) => {
     const tableId = uuid.parse(req.params.tableId);
     const mesa = await prisma.mesa.findUnique({ where: { id: tableId } });
     if (!mesa) throw notFound("Mesa no encontrada");
     await restauranteAutorizado(req.user!, mesa.restauranteId, "personal");
     const { estado, motivo } = estadoSchema.parse(req.body);
+
+    if (req.user!.rol === "MESERO") {
+      if (estado === "RESERVED") {
+        throw forbidden("El mesero solo puede marcar mesas como disponibles, ocupadas o fuera de servicio");
+      }
+      if (estado === "OUT_OF_SERVICE" && (motivo?.length ?? 0) < 3) {
+        throw unprocessable("Indica el motivo para dejar la mesa fuera de servicio");
+      }
+    }
 
     if (estado === "OUT_OF_SERVICE") {
       const futuras = await reservasFuturasActivas(tableId);
