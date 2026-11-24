@@ -16,6 +16,8 @@ const crearSchema = z.object({
   etiqueta: z.string().trim().min(1).max(40),
   capacidad: z.number().int().min(1).max(100),
   forma: z.string().trim().min(1).max(30).optional(),
+  posX: z.number().min(0).max(100).optional(),
+  posY: z.number().min(0).max(100).optional(),
 });
 
 const editarSchema = z
@@ -24,6 +26,8 @@ const editarSchema = z
     etiqueta: z.string().trim().min(1).max(40),
     capacidad: z.number().int().min(1).max(100),
     forma: z.string().trim().min(1).max(30),
+    posX: z.number().min(0).max(100),
+    posY: z.number().min(0).max(100),
   })
   .partial()
   .refine((d) => Object.keys(d).length > 0, "Envía al menos un campo");

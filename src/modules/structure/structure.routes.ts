@@ -57,7 +57,14 @@ structureRouter.delete("/floors/:floorId", requireAuth, requireRole("ADMIN"), as
 structureRouter.post("/restaurants/:id/areas", requireAuth, requireRole("ADMIN"), async (req, res) => {
   const id = uuid.parse(req.params.id);
   await restauranteAutorizado(req.user!, id, "admin");
-  const data = z.object({ pisoId: uuid, nombre: z.string().trim().min(1).max(60) }).parse(req.body);
+  const data = z.object({
+    pisoId: uuid,
+    nombre: z.string().trim().min(1).max(60),
+    posX: z.number().min(0).max(100).optional(),
+    posY: z.number().min(0).max(100).optional(),
+    ancho: z.number().min(10).max(100).optional(),
+    alto: z.number().min(10).max(100).optional(),
+  }).parse(req.body);
 
   const piso = await prisma.piso.findFirst({ where: { id: data.pisoId, restauranteId: id } });
   if (!piso) throw unprocessable("El piso no pertenece a este restaurante");
@@ -82,6 +89,30 @@ structureRouter.get("/restaurants/:id/areas", requireAuth, async (req, res) => {
     include: { piso: { select: { nombre: true } } },
   });
   res.json({ areas });
+});
+
+structureRouter.patch("/areas/:areaId", requireAuth, requireRole("ADMIN"), async (req, res) => {
+  const areaId = uuid.parse(req.params.areaId);
+  const area = await prisma.area.findUnique({ where: { id: areaId }, include: { piso: true } });
+  if (!area) throw notFound("Área no encontrada");
+  await restauranteAutorizado(req.user!, area.piso.restauranteId, "admin");
+  const data = z.object({
+    nombre: z.string().trim().min(1).max(60).optional(),
+    posX: z.number().min(0).max(100).optional(),
+    posY: z.number().min(0).max(100).optional(),
+    ancho: z.number().min(10).max(100).optional(),
+    alto: z.number().min(10).max(100).optional(),
+  }).refine((value) => Object.keys(value).length > 0, "Envía al menos un campo").parse(req.body);
+  const updated = await prisma.area.update({ where: { id: areaId }, data });
+  await registrarAuditoria({
+    actorId: req.user!.id,
+    restauranteId: area.piso.restauranteId,
+    accion: "AREA_UPDATED",
+    entidad: "area",
+    entidadId: areaId,
+    detalle: data,
+  });
+  res.json({ area: updated });
 });
 
 structureRouter.delete("/areas/:areaId", requireAuth, requireRole("ADMIN"), async (req, res) => {

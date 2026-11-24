@@ -126,6 +126,10 @@ model Area {
   id     String @id @default(uuid()) @db.Uuid
   pisoId String @db.Uuid
   nombre String
+  posX   Float  @default(8)
+  posY   Float  @default(10)
+  ancho  Float  @default(28)
+  alto   Float  @default(26)
 
   piso  Piso   @relation(fields: [pisoId], references: [id], onDelete: Cascade)
   mesas Mesa[]
@@ -141,6 +145,8 @@ model Mesa {
   etiqueta      String
   capacidad     Int
   forma         String     @default("cuadrada")
+  posX          Float      @default(16)
+  posY          Float      @default(22)
   estado        EstadoMesa @default(AVAILABLE)
   createdAt     DateTime   @default(now()) @db.Timestamptz(3)
   updatedAt     DateTime   @updatedAt @db.Timestamptz(3)
